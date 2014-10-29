@@ -10,12 +10,8 @@ bridge-utils:
 {% if grains['os_family'] != 'RedHat' %}
 
 docker-repo:
-  pkgrepo.managed:
-    - humanname: Docker Repo
-    - name: deb https://get.docker.com/ubuntu docker main
-    - key_url: https://get.docker.com/gpg
-    - require:
-      - pkg: pkg-core
+  cmd.script:
+    - source: salt://docker/install-docker.sh
 
 # The default GCE images have ip_forwarding explicitly set to 0.
 # Here we take care of commenting that out.
