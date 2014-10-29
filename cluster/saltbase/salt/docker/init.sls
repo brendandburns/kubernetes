@@ -12,6 +12,9 @@ bridge-utils:
 docker-repo:
   cmd.script:
     - source: salt://docker/install-docker.sh
+    - require:
+      - file: {{ environment_file }}
+
 
 # The default GCE images have ip_forwarding explicitly set to 0.
 # Here we take care of commenting that out.
