@@ -1980,3 +1980,57 @@ type RangeAllocation struct {
 	Range string `json:"range" description:"a range string that identifies the range represented by 'data'; required"`
 	Data  []byte `json:"data" description:"a bit array containing all allocated addresses in the previous segment"`
 }
+
+// A schema is a generic representation of a resource, it is used by add-ons and plugins to add new resource
+// types to the API
+type Schema struct {
+	TypeMeta   `json:",inline"`
+	ObjectMeta `json:"metadata,omitempty" description:"standard object metadata"`
+
+	Versions []Version `json:"versions,omitempty" description:"the versions for this schema"`
+}
+
+type Version struct {
+	Name string     `json:"name,omitempty" description:"name of this version"`
+	Spec SchemaSpec `json:"spec,omitempty" description: "the specification of this schema version"`
+}
+
+type SchemaSpec struct {
+	Fields []Field `json:"fields,omitempty" description:"the fields that define this schema"`
+}
+
+type SchemaList struct {
+	TypeMeta `json:",inline"`
+	ListMeta `json:"metadata,omitempty" description:"standard list metadata; see http://docs.k8s.io/api-conventions.md#metadata"`
+
+	Items []Schema `json:"items" description:"items is a list of schema objects"`
+}
+
+// A Field describes a field in an object schema
+type Field struct {
+	Name string `json:"name,omitempty" description:"the name of this field"`
+	Type Type   `json:"type,omitempty" description:"the type of this field"`
+}
+
+type Kind string
+
+const (
+	KindNumber  Kind = "Number"
+	KindString  Kind = "String"
+	KindBoolean Kind = "Boolean"
+	KindObject  Kind = "Object"
+	KindArray   Kind = "Array"
+)
+
+type Type struct {
+	Kind   Kind        `json:"name,omitempty" description:"the kind of this type"`
+	Schema *SchemaSpec `json:"schema,omitempty" description:"the schema for this type, applies to 'Object' and 'Array' types"`
+}
+
+type CustomObjectData struct {
+	TypeMeta   `json:",inline"`
+	ObjectMeta `json:"metadata,omitempty" description:"standard object metadata"`
+
+	Version string `json:"version,omitempty" description:"the version encoding for this data"`
+	Data    string `json:"name,omitempty" description:"the data for this data"`
+}

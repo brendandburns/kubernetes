@@ -1703,3 +1703,45 @@ func ValidateSecurityContext(sc *api.SecurityContext) errs.ValidationErrorList {
 	}
 	return allErrs
 }
+
+func ValidateSchema(sc *api.Schema) errs.ValidationErrorList {
+	allErrs := errs.ValidationErrorList{}
+	if len(sc.Name) == 0 {
+		allErrs = append(allErrs, errs.NewFieldInvalid("name", sc.Name, "name must be non-empty"))
+	}
+	versions := util.StringSet{}
+	for ix := range sc.Versions {
+		version := &sc.Versions[ix]
+		if len(version.Name) == 0 {
+			allErrs = append(allErrs, errs.NewFieldInvalid("name", version, "name can not be empty"))
+		}
+		if versions.Has(version.Name) {
+			allErrs = append(allErrs, errs.NewFieldDuplicate("version", version))
+		}
+		versions.Insert(version.Name)
+		allErrs = append(allErrs, ValidateSchemaSpec(&version.Spec)...)
+	}
+	return allErrs
+}
+
+func ValidateSchemaSpec(sc *api.SchemaSpec) errs.ValidationErrorList {
+	allErrs := errs.ValidationErrorList{}
+	if len(sc.Fields) == 0 {
+		allErrs = append(allErrs, errs.NewFieldInvalid("fields", sc.Fields, "fields must contain at least one field."))
+	}
+	nameSet := util.StringSet{}
+	for ix, field := range sc.Fields {
+		if len(field.Name) == 0 {
+			allErrs = append(allErrs, errs.NewFieldInvalid(fmt.Sprintf("fields[%d]", ix), field, "name must be non-empty"))
+		}
+		if nameSet.Has(field.Name) {
+			allErrs = append(allErrs, errs.NewFieldDuplicate(fmt.Sprintf("fields[%d]", ix), field))
+		}
+		nameSet.Insert(field.Name)
+	}
+	return allErrs
+}
+
+func ValidateSchemaUpdate(oldSchema, newSchema *api.Schema) errs.ValidationErrorList {
+	return errs.ValidationErrorList{fmt.Errorf("Schema update is not supported.")}
+}

@@ -63,6 +63,8 @@ import (
 	podetcd "github.com/GoogleCloudPlatform/kubernetes/pkg/registry/pod/etcd"
 	podtemplateetcd "github.com/GoogleCloudPlatform/kubernetes/pkg/registry/podtemplate/etcd"
 	resourcequotaetcd "github.com/GoogleCloudPlatform/kubernetes/pkg/registry/resourcequota/etcd"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/registry/schema"
+	schemaetcd "github.com/GoogleCloudPlatform/kubernetes/pkg/registry/schema/etcd"
 	secretetcd "github.com/GoogleCloudPlatform/kubernetes/pkg/registry/secret/etcd"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/registry/service"
 	etcdallocator "github.com/GoogleCloudPlatform/kubernetes/pkg/registry/service/allocator/etcd"
@@ -464,6 +466,8 @@ func (m *Master) init(c *Config) {
 
 	controllerStorage := controlleretcd.NewREST(c.EtcdHelper)
 
+	schemaStorage := schemaetcd.NewStorage(c.EtcdHelper)
+
 	// TODO: Factor out the core API registration
 	m.storage = map[string]rest.Storage{
 		"pods":             podStorage.Pod,
@@ -500,6 +504,7 @@ func (m *Master) init(c *Config) {
 		"persistentVolumeClaims/status": persistentVolumeClaimStatusStorage,
 
 		"componentStatuses": componentstatus.NewStorage(func() map[string]apiserver.Server { return m.getServersToValidate(c) }),
+		"schemas": schemaStorage,
 	}
 
 	// establish the node proxy dialer
@@ -582,6 +587,9 @@ func (m *Master) init(c *Config) {
 		m.mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		m.mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	}
+	customRegistry := apiserver.NewEtcdCustomObjectRegistry(c.EtcdHelper.Client, latest.Codec)
+	customHandler := apiserver.NewCustomObjectHandler(schema.NewRegistry(schemaStorage), customRegistry, latest.Codec)
+	m.mux.Handle("/custom/", customHandler)
 
 	handler := http.Handler(m.mux.(*http.ServeMux))
 

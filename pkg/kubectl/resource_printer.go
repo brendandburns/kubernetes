@@ -272,6 +272,7 @@ var persistentVolumeColumns = []string{"NAME", "LABELS", "CAPACITY", "ACCESSMODE
 var persistentVolumeClaimColumns = []string{"NAME", "LABELS", "STATUS", "VOLUME"}
 var componentStatusColumns = []string{"NAME", "STATUS", "MESSAGE", "ERROR"}
 var withNamespacePrefixColumns = []string{"NAMESPACE"} // TODO(erictune): print cluster name too.
+var schemaColumns = []string{"NAME"}
 
 // addDefaultHandlers adds print handlers for default Kubernetes types.
 func (h *HumanReadablePrinter) addDefaultHandlers() {
@@ -305,6 +306,8 @@ func (h *HumanReadablePrinter) addDefaultHandlers() {
 	h.Handler(persistentVolumeColumns, printPersistentVolumeList)
 	h.Handler(componentStatusColumns, printComponentStatus)
 	h.Handler(componentStatusColumns, printComponentStatusList)
+	h.Handler(schemaColumns, printSchema)
+	h.Handler(schemaColumns, printSchemaList)
 }
 
 func (h *HumanReadablePrinter) unknown(data []byte, w io.Writer) error {
@@ -1001,6 +1004,20 @@ func formatWideHeaders(wide bool, t reflect.Type) []string {
 		}
 	}
 	return nil
+}
+
+func printSchemaList(list *api.SchemaList, w io.Writer) error {
+	for _, item := range list.Items {
+		if _, err := fmt.Fprintf(w, "%s\n", item.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printSchema(schema *api.Schema, w io.Writer) error {
+	_, err := fmt.Fprintf(w, "%s\n", schema.Name)
+	return err
 }
 
 // PrintObj prints the obj in a human-friendly format according to the type of the obj.
