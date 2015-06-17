@@ -19,6 +19,7 @@ package e2e
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"path"
 	"strings"
 	"testing"
@@ -47,6 +48,8 @@ var (
 	cloudConfig = &testContext.CloudConfig
 
 	reportDir = flag.String("report-dir", "", "Path to the directory where the JUnit XML reports should be saved. Default is empty, which doesn't generate these reports.")
+
+	www = flag.Bool("www", false, "If true, turn up a web server and a web test UX")
 )
 
 type failReporter struct {
@@ -151,6 +154,12 @@ func TestE2E(t *testing.T) {
 				coreDump(*reportDir)
 			}
 		}()
+	}
+	if *www {
+		w := NewWWWReporter()
+		r = append(r, w)
+		go http.ListenAndServe("localhost:8002", w)
+		glog.Infof("Serving status on http://localhost:8002")
 	}
 	ginkgo.RunSpecsWithDefaultAndCustomReporters(t, "Kubernetes e2e suite", r)
 }
