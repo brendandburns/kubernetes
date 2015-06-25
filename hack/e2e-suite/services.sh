@@ -288,6 +288,7 @@ function verify_from_container() {
             else
               exit 1
             fi
+            sleep 5
           done
       '" | sort -r -n | uniq)) \
       || error "testing $1 VIP from container failed"
