@@ -123,7 +123,7 @@ func badRequest(req *http.Request, w http.ResponseWriter, codec runtime.Codec, a
 	err := errors.NewBadRequest(reason)
 	httplog.LogOf(req, w).Addf("Error %s: %v", action, err)
 	status := errToAPIStatus(err)
-	writeJSON(status.Code, codec, status, w)
+	writeJSON(status.Code, codec, status, w, true)
 }
 
 func writeRawJSONData(w http.ResponseWriter, data []byte) error {
@@ -177,7 +177,7 @@ func (c *CustomObjectHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 	if err != nil {
 		httplog.LogOf(req, w).Addf("Error getting Schema: %v", err)
 		status := errToAPIStatus(err)
-		writeJSON(status.Code, c.codec, status, w)
+		writeJSON(status.Code, c.codec, status, w, true)
 		return
 	}
 	spec := findVersion(schema, version)
@@ -193,7 +193,7 @@ func (c *CustomObjectHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 			if err != nil {
 				httplog.LogOf(req, w).Addf("Error getting Schema object: %v", err)
 				status := errToAPIStatus(err)
-				writeJSON(status.Code, c.codec, status, w)
+				writeJSON(status.Code, c.codec, status, w, true)
 				return
 			}
 			buff := bytes.Buffer{}
@@ -216,14 +216,14 @@ func (c *CustomObjectHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 		if err != nil {
 			httplog.LogOf(req, w).Addf("Error getting Schema object: %v", err)
 			status := errToAPIStatus(err)
-			writeJSON(status.Code, c.codec, status, w)
+			writeJSON(status.Code, c.codec, status, w, true)
 			return
 		}
 		if data.Version != version {
 			err := errors.NewBadRequest(fmt.Sprintf("Storage data version %s is not the same as requested version: %s", data.Version, version))
 			httplog.LogOf(req, w).Addf("Error getting Schema object: %v", err)
 			status := errToAPIStatus(err)
-			writeJSON(status.Code, c.codec, status, w)
+			writeJSON(status.Code, c.codec, status, w, true)
 		}
 		writeRawJSONData(w, []byte(data.Data))
 	case "POST":
@@ -232,14 +232,14 @@ func (c *CustomObjectHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 			httplog.LogOf(req, w).Addf("Error getting Schema object: %v", err)
 			err = errors.NewBadRequest(err.Error())
 			status := errToAPIStatus(err)
-			writeJSON(status.Code, c.codec, status, w)
+			writeJSON(status.Code, c.codec, status, w, true)
 			return
 		}
 		// TODO: Schema validation here.
 		if err := c.customRegistry.Set(schema.Name, obj.Name, obj); err != nil {
 			httplog.LogOf(req, w).Addf("Error getting Schema object: %v", err)
 			status := errToAPIStatus(err)
-			writeJSON(status.Code, c.codec, status, w)
+			writeJSON(status.Code, c.codec, status, w, true)
 			return
 		}
 		writeRawJSONData(w, []byte(obj.Data))
@@ -252,7 +252,7 @@ func (c *CustomObjectHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 		if err := c.customRegistry.Delete(schemaName, name); err != nil {
 			httplog.LogOf(req, w).Addf("Error deleting Schema object: %v", err)
 			status := errToAPIStatus(err)
-			writeJSON(status.Code, c.codec, status, w)
+			writeJSON(status.Code, c.codec, status, w, true)
 			return
 		}
 	case "PUT":
@@ -265,13 +265,13 @@ func (c *CustomObjectHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 		if err != nil {
 			httplog.LogOf(req, w).Addf("Error deleting Schema object: %v", err)
 			status := errToAPIStatus(err)
-			writeJSON(status.Code, c.codec, status, w)
+			writeJSON(status.Code, c.codec, status, w, true)
 			return
 		}
 		if err := c.customRegistry.Set(schemaName, name, obj); err != nil {
 			httplog.LogOf(req, w).Addf("Error deleting Schema object: %v", err)
 			status := errToAPIStatus(err)
-			writeJSON(status.Code, c.codec, status, w)
+			writeJSON(status.Code, c.codec, status, w, true)
 			return
 		}
 		writeRawJSONData(w, []byte(obj.Data))
