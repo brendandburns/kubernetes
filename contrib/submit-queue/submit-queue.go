@@ -62,11 +62,8 @@ var (
 	userWhitelist     = flag.String("user-whitelist", "", "Path to a whitelist file that contains users to auto-merge.  Required.")
 	requiredContexts  = flag.String("required-contexts", "cla/google,Shippable,continuous-integration/travis-ci/pr,Jenkins GCE e2e", "Comma separate list of status contexts required for a PR to be considered ok to merge")
 	whitelistOverride = flag.String("whitelist-override-label", "ok-to-merge", "Github label, if present on a PR it will be merged even if the author isn't in the whitelist")
-)
-
-const (
-	org     = "GoogleCloudPlatform"
-	project = "kubernetes"
+	org               = flag.String("organization", "kubernetes", "The github organization to monitor")
+	project           = flag.String("project", "kubernetes", "The github project to monitor")
 )
 
 // This is called on a potentially mergeable PR
@@ -89,15 +86,15 @@ func runE2ETests(client *github_api.Client, pr *github_api.PullRequest, issue *g
 	// Ask for a fresh build
 	glog.V(4).Infof("Asking PR builder to build %d", *pr.Number)
 	body := "@k8s-bot test this [testing build queue, sorry for the noise]"
-	if _, _, err := client.Issues.CreateComment(org, project, *pr.Number, &github_api.IssueComment{Body: &body}); err != nil {
+	if _, _, err := client.Issues.CreateComment(*org, *project, *pr.Number, &github_api.IssueComment{Body: &body}); err != nil {
 		return err
 	}
 
 	// Wait for the build to start
-	err := github.WaitForPending(client, org, project, *pr.Number)
+	err := github.WaitForPending(client, *org, *project, *pr.Number)
 
 	// Wait for the status to go back to 'success'
-	ok, err := github.ValidateStatus(client, org, project, *pr.Number, []string{}, true)
+	ok, err := github.ValidateStatus(client, *org, *project, *pr.Number, []string{}, true)
 	if err != nil {
 		return err
 	}
@@ -108,11 +105,11 @@ func runE2ETests(client *github_api.Client, pr *github_api.PullRequest, issue *g
 	if !*dryrun {
 		glog.Infof("Merging PR: %d", *pr.Number)
 		mergeBody := "Automatic merge from SubmitQueue"
-		if _, _, err := client.Issues.CreateComment(org, project, *pr.Number, &github_api.IssueComment{Body: &mergeBody}); err != nil {
+		if _, _, err := client.Issues.CreateComment(*org, *project, *pr.Number, &github_api.IssueComment{Body: &mergeBody}); err != nil {
 			glog.Warningf("Failed to create merge comment: %v", err)
 			return err
 		}
-		_, _, err := client.PullRequests.Merge(org, project, *pr.Number, "Auto commit by PR queue bot")
+		_, _, err := client.PullRequests.Merge(*org, *project, *pr.Number, "Auto commit by PR queue bot")
 		return err
 	}
 	glog.Infof("Skipping actual merge because --dry-run is set")
@@ -155,7 +152,7 @@ func main() {
 		WhitelistOverride:      *whitelistOverride,
 	}
 	for !*oneOff {
-		if err := github.ForEachCandidatePRDo(client, org, project, runE2ETests, *oneOff, config); err != nil {
+		if err := github.ForEachCandidatePRDo(client, *org, *project, runE2ETests, *oneOff, config); err != nil {
 			glog.Fatalf("Error getting candidate PRs: %v", err)
 		}
 	}
