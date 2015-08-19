@@ -166,3 +166,10 @@ type ThirdPartyResourceData struct {
 
 	Data []byte `json:"name,omitempty" description:"the raw JSON data for this data"`
 }
+
+type ThirdPartyResourceDataList struct {
+	api.TypeMeta `json:",inline"`
+	api.ListMeta `json:"metadata,omitempty" description:"standard list metadata; see http://docs.k8s.io/api-conventions.md#metadata"`
+
+	Items []ThirdPartyResourceData `json:"items" description:"items is a list of third party objects"`
+}
