@@ -104,33 +104,6 @@ func TestUpdate(t *testing.T) {
 	)
 }
 
-func TestDelete(t *testing.T) {
-	ctx := api.NewDefaultContext()
-	storage, fakeEtcdClient, _ := newStorage(t)
-	test := resttest.New(t, storage, fakeEtcdClient.SetError)
-	rsrc := validNewThirdPartyResource("foo2")
-	key, _ := storage.KeyFunc(ctx, "foo2")
-	key = etcdtest.AddPrefix(key)
-	createFn := func() runtime.Object {
-		fakeEtcdClient.Data[key] = tools.EtcdResponseWithError{
-			R: &etcd.Response{
-				Node: &etcd.Node{
-					Value:         runtime.EncodeOrDie(testapi.Codec(), rsrc),
-					ModifiedIndex: 1,
-				},
-			},
-		}
-		return rsrc
-	}
-	gracefulSetFn := func() bool {
-		if fakeEtcdClient.Data[key].R.Node == nil {
-			return false
-		}
-		return fakeEtcdClient.Data[key].R.Node.TTL == 30
-	}
-	test.TestDeleteNoGraceful(createFn, gracefulSetFn)
-}
-
 func TestGet(t *testing.T) {
 	storage, fakeEtcdClient, _ := newStorage(t)
 	test := resttest.New(t, storage, fakeEtcdClient.SetError)
