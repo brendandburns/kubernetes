@@ -98,7 +98,7 @@ type FooList struct {
 	items []Foo `json:"items"`
 }
 
-func initThirdParty(t *testing.T) (*tools.FakeEtcdClient, *httptest.Server) {
+func initThirdParty(t *testing.T) (*Master, *tools.FakeEtcdClient, *httptest.Server) {
 	master := &Master{}
 	api := &expapi.ThirdPartyResource{
 		ObjectMeta: api.ObjectMeta{
@@ -123,11 +123,11 @@ func initThirdParty(t *testing.T) (*tools.FakeEtcdClient, *httptest.Server) {
 	}
 
 	server := httptest.NewServer(master.handlerContainer.ServeMux)
-	return fakeClient, server
+	return master, fakeClient, server
 }
 
 func TestInstallThirdPartyAPIList(t *testing.T) {
-	fakeClient, server := initThirdParty(t)
+	_, fakeClient, server := initThirdParty(t)
 	defer server.Close()
 
 	fakeClient.ExpectNotFoundGet(etcdtest.PathPrefix() + "/ThirdPartyResourceData/company.com/foos/default")
@@ -190,7 +190,7 @@ func decodeResponse(resp *http.Response, obj interface{}) error {
 }
 
 func TestInstallThirdPartyAPIGet(t *testing.T) {
-	fakeClient, server := initThirdParty(t)
+	_, fakeClient, server := initThirdParty(t)
 	defer server.Close()
 
 	expectedObj := Foo{
@@ -229,7 +229,7 @@ func TestInstallThirdPartyAPIGet(t *testing.T) {
 }
 
 func TestInstallThirdPartyAPIPost(t *testing.T) {
-	fakeClient, server := initThirdParty(t)
+	_, fakeClient, server := initThirdParty(t)
 	defer server.Close()
 
 	inputObj := Foo{
@@ -290,7 +290,7 @@ func TestInstallThirdPartyAPIPost(t *testing.T) {
 }
 
 func TestInstallThirdPartyAPIDelete(t *testing.T) {
-	fakeClient, server := initThirdParty(t)
+	_, fakeClient, server := initThirdParty(t)
 	defer server.Close()
 
 	expectedObj := Foo{
@@ -360,4 +360,61 @@ func httpDelete(url string) (*http.Response, error) {
 	}
 	client := &http.Client{}
 	return client.Do(req)
+}
+
+func TestInstallThirdPartyAPIRemove(t *testing.T) {
+	master, fakeClient, server := initThirdParty(t)
+	defer server.Close()
+
+	expectedObj := Foo{
+		ObjectMeta: api.ObjectMeta{
+			Name: "test",
+		},
+		TypeMeta: api.TypeMeta{
+			Kind: "Foo",
+		},
+		SomeField:  "test field",
+		OtherField: 10,
+	}
+	if err := storeToEtcd(fakeClient, "/ThirdPartyResourceData/company.com/foos/default/test", "test", expectedObj); err != nil {
+		t.Errorf("unexpected error: %v", err)
+		t.FailNow()
+		return
+	}
+
+	resp, err := http.Get(server.URL + "/thirdparty/company.com/v1/namespaces/default/foos/test")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("unexpected status: %v", resp)
+	}
+
+	item := Foo{}
+	if err := decodeResponse(resp, &item); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if !reflect.DeepEqual(item, expectedObj) {
+		t.Errorf("expected:\n%v\nsaw:\n%v\n", expectedObj, item)
+	}
+
+	master.RemoveAPI("/thirdparty/company.com/v1")
+
+	resp, err = http.Get(server.URL + "/thirdparty/company.com/v1/namespaces/default/foos/test")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+		return
+	}
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unexpected status: %v", resp)
+	}
+	// TODO: validate that data was removed prior to api removal
+	//expectDeletedKeys := []string{etcdtest.PathPrefix() + "/ThirdPartyResourceData/company.com/foos/default/test"}
+	//if !reflect.DeepEqual(fakeClient.DeletedKeys, expectDeletedKeys) {
+	//	t.Errorf("unexpected deleted keys: %v", fakeClient.DeletedKeys)
+	//}
 }
