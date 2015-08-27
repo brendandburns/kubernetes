@@ -784,6 +784,16 @@ func (m *Master) api_v1() *apiserver.APIGroupVersion {
 	return version
 }
 
+func (m *Master) RemoveAPI(path string) {
+	services := m.handlerContainer.RegisteredWebServices()
+	for ix := range services {
+		if services[ix].RootPath() == path {
+			m.handlerContainer.Remove(services[ix])
+			return
+		}
+	}
+}
+
 func (m *Master) InstallThirdPartyAPI(rsrc *expapi.ThirdPartyResource) error {
 	kind, group, err := thirdpartyresourcedata.ExtractApiGroupAndKind(rsrc)
 	if err != nil {
