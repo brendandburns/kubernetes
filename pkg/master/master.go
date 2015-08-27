@@ -795,6 +795,39 @@ func (m *Master) RemoveAPI(path string) {
 	}
 }
 
+const thirdpartyprefix = "/thirdparty/"
+
+func makeThirdPartyPath(group string) string {
+	return thirdpartyprefix + group + "/"
+}
+
+func (m *Master) ListThirdPartyAPIs() []string {
+	services := m.handlerContainer.RegisteredWebServices()
+	result := []string{}
+	for ix := range services {
+		service := services[ix]
+		if strings.HasPrefix(service.RootPath(), thirdpartyprefix) {
+			result = append(result, service.RootPath())
+		}
+	}
+	return result
+}
+
+func (m *Master) HasThirdPartyAPI(rsrc *expapi.ThirdPartyResource) (bool, error) {
+	_, group, err := thirdpartyresourcedata.ExtractApiGroupAndKind(rsrc)
+	if err != nil {
+		return false, err
+	}
+	path := makeThirdPartyPath(group)
+	services := m.handlerContainer.RegisteredWebServices()
+	for ix := range services {
+		if services[ix].RootPath() == path {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *Master) InstallThirdPartyAPI(rsrc *expapi.ThirdPartyResource) error {
 	kind, group, err := thirdpartyresourcedata.ExtractApiGroupAndKind(rsrc)
 	if err != nil {
@@ -804,7 +837,7 @@ func (m *Master) InstallThirdPartyAPI(rsrc *expapi.ThirdPartyResource) error {
 	if err := thirdparty.InstallREST(m.handlerContainer); err != nil {
 		glog.Fatalf("Unable to setup thirdparty api: %v", err)
 	}
-	thirdPartyPrefix := "/thirdparty/" + group + "/"
+	thirdPartyPrefix := makeThirdPartyPath(group)
 	apiserver.AddApiWebService(m.handlerContainer, thirdPartyPrefix, []string{rsrc.Versions[0].Name})
 	thirdPartyRequestInfoResolver := &apiserver.APIRequestInfoResolver{APIPrefixes: util.NewStringSet(strings.TrimPrefix(group, "/")), RestMapper: thirdparty.Mapper}
 	apiserver.InstallServiceErrorHandler(m.handlerContainer, thirdPartyRequestInfoResolver, []string{thirdparty.Version})
@@ -814,7 +847,7 @@ func (m *Master) InstallThirdPartyAPI(rsrc *expapi.ThirdPartyResource) error {
 func (m *Master) thirdpartyapi(group, kind, version string) *apiserver.APIGroupVersion {
 	resourceStorage := thirdpartyresourcedataetcd.NewREST(m.thirdPartyStorage, group, kind)
 
-	apiRoot := "/thirdparty/" + group + "/"
+	apiRoot := makeThirdPartyPath(group)
 
 	storage := map[string]rest.Storage{
 		strings.ToLower(kind) + "s": resourceStorage,
