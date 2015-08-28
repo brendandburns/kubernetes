@@ -582,6 +582,9 @@ func (m *Master) init(c *Config) {
 	apiserver.InstallServiceErrorHandler(m.handlerContainer, requestInfoResolver, apiVersions)
 
 	if m.exp {
+		// TODO: this should be different.
+		m.thirdPartyStorage = c.DatabaseStorage
+
 		expVersion := m.expapi(c)
 		if err := expVersion.InstallREST(m.handlerContainer); err != nil {
 			glog.Fatalf("Unable to setup experimental api: %v", err)
@@ -785,6 +788,27 @@ func (m *Master) api_v1() *apiserver.APIGroupVersion {
 	return version
 }
 
+const thirdpartyprefix = "/thirdparty/"
+
+func makeThirdPartyPath(group string) string {
+	return thirdpartyprefix + group
+}
+
+func (m *Master) HasAPI(rsrc *expapi.ThirdPartyResource) (bool, error) {
+	_, group, err := thirdpartyresourcedata.ExtractApiGroupAndKind(rsrc)
+	if err != nil {
+		return false, err
+	}
+	path := makeThirdPartyPath(group)
+	services := m.handlerContainer.RegisteredWebServices()
+	for ix := range services {
+		if services[ix].RootPath() == path {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *Master) RemoveAPI(path string) {
 	services := m.handlerContainer.RegisteredWebServices()
 	for ix := range services {
@@ -793,12 +817,6 @@ func (m *Master) RemoveAPI(path string) {
 			return
 		}
 	}
-}
-
-const thirdpartyprefix = "/thirdparty/"
-
-func makeThirdPartyPath(group string) string {
-	return thirdpartyprefix + group + "/"
 }
 
 func (m *Master) ListThirdPartyAPIs() []string {
@@ -837,8 +855,7 @@ func (m *Master) InstallThirdPartyAPI(rsrc *expapi.ThirdPartyResource) error {
 	if err := thirdparty.InstallREST(m.handlerContainer); err != nil {
 		glog.Fatalf("Unable to setup thirdparty api: %v", err)
 	}
-	thirdPartyPrefix := makeThirdPartyPath(group)
-	apiserver.AddApiWebService(m.handlerContainer, thirdPartyPrefix, []string{rsrc.Versions[0].Name})
+	apiserver.AddApiWebService(m.handlerContainer, makeThirdPartyPath(group), []string{rsrc.Versions[0].Name})
 	thirdPartyRequestInfoResolver := &apiserver.APIRequestInfoResolver{APIPrefixes: util.NewStringSet(strings.TrimPrefix(group, "/")), RestMapper: thirdparty.Mapper}
 	apiserver.InstallServiceErrorHandler(m.handlerContainer, thirdPartyRequestInfoResolver, []string{thirdparty.Version})
 	return nil
@@ -880,6 +897,17 @@ func (m *Master) expapi(c *Config) *apiserver.APIGroupVersion {
 	autoscalerStorage := horizontalpodautoscaleretcd.NewREST(c.ExpDatabaseStorage)
 	thirdPartyResourceStorage := thirdpartyresourceetcd.NewREST(c.ExpDatabaseStorage)
 
+	thirdPartyControl := ThirdPartyController{
+		master: m,
+		thirdPartyResourceRegistry: thirdPartyResourceStorage,
+	}
+	go func() {
+		util.Forever(func() {
+			if err := thirdPartyControl.SyncLoop(); err != nil {
+				glog.Warningf("third party resource sync failed: %v", err)
+			}
+		}, 10*time.Second)
+	}()
 	storage := map[string]rest.Storage{
 		strings.ToLower("replicationControllers"):       controllerStorage.ReplicationController,
 		strings.ToLower("replicationControllers/scale"): controllerStorage.Scale,

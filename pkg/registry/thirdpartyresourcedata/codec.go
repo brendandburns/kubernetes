@@ -151,16 +151,33 @@ const template = `{
   "items": [ %s ]
 }`
 
+func encodeToJSON(obj *expapi.ThirdPartyResourceData) ([]byte, error) {
+	var objOut interface{}
+	if err := json.Unmarshal(obj.Data, &objOut); err != nil {
+		return nil, err
+	}
+	objMap, ok := objOut.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected type: %v", objOut)
+	}
+	objMap["metadata"] = obj.ObjectMeta
+	return json.Marshal(objMap)
+}
+
 func (t *thirdPartyResourceDataCodec) Encode(obj runtime.Object) (data []byte, err error) {
 	switch obj := obj.(type) {
 	case *expapi.ThirdPartyResourceData:
-		return obj.Data, nil
+		return encodeToJSON(obj)
 	case *expapi.ThirdPartyResourceDataList:
 		// TODO: There must be a better way to do this...
 		buff := &bytes.Buffer{}
 		dataStrings := make([]string, len(obj.Items))
 		for ix := range obj.Items {
-			dataStrings[ix] = string(obj.Items[ix].Data)
+			data, err := encodeToJSON(&obj.Items[ix])
+			if err != nil {
+				return nil, err
+			}
+			dataStrings[ix] = string(data)
 		}
 		fmt.Fprintf(buff, template, t.kind+"List", strings.Join(dataStrings, ","))
 		return buff.Bytes(), nil

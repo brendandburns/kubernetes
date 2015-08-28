@@ -223,6 +223,9 @@ func TestInstallThirdPartyAPIGet(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
+	// TODO: validate etcd set things here
+	item.ObjectMeta = expectedObj.ObjectMeta
+	
 	if !reflect.DeepEqual(item, expectedObj) {
 		t.Errorf("expected:\n%v\nsaw:\n%v\n", expectedObj, item)
 	}
@@ -263,6 +266,9 @@ func TestInstallThirdPartyAPIPost(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
+	// TODO: validate etcd set things here
+	item.ObjectMeta = inputObj.ObjectMeta
+
 	if !reflect.DeepEqual(item, inputObj) {
 		t.Errorf("expected:\n%v\nsaw:\n%v\n", inputObj, item)
 	}
@@ -283,6 +289,9 @@ func TestInstallThirdPartyAPIPost(t *testing.T) {
 	if err := json.Unmarshal(thirdPartyObj.Data, &item); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+
+	// TODO: validate etcd set things here
+	item.ObjectMeta = inputObj.ObjectMeta
 
 	if !reflect.DeepEqual(item, inputObj) {
 		t.Errorf("expected:\n%v\nsaw:\n%v\n", inputObj, item)
@@ -323,6 +332,9 @@ func TestInstallThirdPartyAPIDelete(t *testing.T) {
 	if err := decodeResponse(resp, &item); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+
+	// TODO: validate etcd set things here
+	item.ObjectMeta = expectedObj.ObjectMeta
 
 	if !reflect.DeepEqual(item, expectedObj) {
 		t.Errorf("expected:\n%v\nsaw:\n%v\n", expectedObj, item)
@@ -396,6 +408,9 @@ func TestInstallThirdPartyAPIRemove(t *testing.T) {
 	if err := decodeResponse(resp, &item); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+
+	// TODO: validate etcd set things here
+	item.ObjectMeta = expectedObj.ObjectMeta
 
 	if !reflect.DeepEqual(item, expectedObj) {
 		t.Errorf("expected:\n%v\nsaw:\n%v\n", expectedObj, item)

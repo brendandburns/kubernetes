@@ -109,6 +109,11 @@ func Until(f func(), period time.Duration, stopCh <-chan struct{}) {
 	}
 }
 
+// Forever is syntactic sugar on top of Until
+func Forever(f func(), period time.Duration) {
+	Until(f, period, NeverStop)
+}
+
 // IntOrString is a type that can hold an int or a string.  When used in
 // JSON or YAML marshalling and unmarshalling, it produces or consumes the
 // inner type.  This allows you to have, for example, a JSON field that can

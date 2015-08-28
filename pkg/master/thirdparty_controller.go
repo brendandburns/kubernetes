@@ -2,17 +2,16 @@ package master
 
 import (
 	"fmt"
-	"time"
+	"strings"
 
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/expapi"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
+	"k8s.io/kubernetes/pkg/runtime"
 	thirdpartyresourceetcd "k8s.io/kubernetes/pkg/registry/thirdpartyresource/etcd"
 	"k8s.io/kubernetes/pkg/registry/thirdpartyresourcedata"
 	"k8s.io/kubernetes/pkg/util"
-	
-	"github.com/golang/glog"
 )
 
 type APIInterface interface {
@@ -43,6 +42,10 @@ func (t *ThirdPartyController) SyncLoop() error {
 	if err != nil {
 		return err
 	}
+	return t.syncResourceList(list)
+}
+
+func (t *ThirdPartyController) syncResourceList(list runtime.Object) error {	
 	existing := util.StringSet{}
 	switch list := list.(type) {
 	case *expapi.ThirdPartyResourceList:
@@ -62,7 +65,14 @@ func (t *ThirdPartyController) SyncLoop() error {
 	}
 	installed := t.master.ListThirdPartyAPIs()
 	for _, installedAPI := range installed {
-		if !existing.Has(installedAPI) {
+		found := false
+		for _, apiPath := range existing.List() {
+			if strings.HasPrefix(installedAPI, apiPath) {
+				found = true
+				break
+			}
+		}
+		if !found {
 			t.master.RemoveAPI(installedAPI)
 		}
 	}
@@ -70,12 +80,3 @@ func (t *ThirdPartyController) SyncLoop() error {
 	return nil
 }
 
-func (t *ThirdPartyController) Sync() {
-	ticker := time.Tick(10 * time.Second)
-	for {
-		if err := t.SyncLoop(); err != nil {
-			glog.Errorf("third party api sync failed: %v", err)
-		}
-		<- ticker
-	}
-}
