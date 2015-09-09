@@ -46,10 +46,14 @@ import (
 	"k8s.io/kubernetes/pkg/registry/endpoint"
 	"k8s.io/kubernetes/pkg/registry/namespace"
 	"k8s.io/kubernetes/pkg/registry/registrytest"
+	thirdpartyresourcedataetcd "k8s.io/kubernetes/pkg/registry/thirdpartyresourcedata/etcd"
 	etcdstorage "k8s.io/kubernetes/pkg/storage/etcd"
 	"k8s.io/kubernetes/pkg/tools"
 	"k8s.io/kubernetes/pkg/tools/etcdtest"
 	"k8s.io/kubernetes/pkg/util"
+
+	"github.com/coreos/go-etcd/etcd"
+	"github.com/emicklei/go-restful"
 )
 
 // setUp is a convience function for setting up for (most) tests.
@@ -518,6 +522,19 @@ func storeToEtcd(fakeClient *tools.FakeEtcdClient, path, name string, obj interf
 	return err
 }
 
+func setupEtcdList(fakeClient *tools.FakeEtcdClient, path string, list []Foo) error {
+	resp := tools.EtcdResponseWithError{R: &etcd.Response{}}
+	for _, obj := range list {
+		data, err := encodeToThirdParty(obj.Name, obj)
+		if err != nil {
+			return err
+		}
+		resp.R.Node.Nodes = append(resp.R.Node.Nodes, &etcd.Node{Value: string(data)})
+	}
+	fakeClient.Data[path] = resp
+	return nil
+}
+
 func decodeResponse(resp *http.Response, obj interface{}) error {
 	defer resp.Body.Close()
 
@@ -622,6 +639,9 @@ func testInstallThirdPartyAPIPostForVersion(t *testing.T, version string) {
 	expectedObj.CreationTimestamp = item.CreationTimestamp
 	if !assert.True(reflect.DeepEqual(item, expectedObj)) {
 		t.Errorf("expected:\n%v\nsaw:\n%v\n", expectedObj, item)
+
+	if !reflect.DeepEqual(item, expectedObj) {
+		t.Errorf("expected:\n%v\nsaw:\n%v\n", inputObj, item)
 	}
 
 	etcdResp, err := fakeClient.Get(etcdtest.PathPrefix()+"/ThirdPartyResourceData/company.com/foos/default/test", false, false)
@@ -716,4 +736,71 @@ func httpDelete(url string) (*http.Response, error) {
 	}
 	client := &http.Client{}
 	return client.Do(req)
+}
+
+func TestInstallThirdPartyResourceRemove(t *testing.T) {
+	for _, version := range versionsToTest {
+		testInstallThirdPartyResourceRemove(t, version)
+	}
+}
+
+func testInstallThirdPartyResourceRemove(t *testing.T, version string) {
+	master, fakeClient, server := initThirdParty(t, version)
+	defer server.Close()
+
+	expectedObj := Foo{
+		ObjectMeta: api.ObjectMeta{
+			Name: "test",
+		},
+		TypeMeta: api.TypeMeta{
+			Kind: "Foo",
+		},
+		SomeField:  "test field",
+		OtherField: 10,
+	}
+	if err := storeToEtcd(fakeClient, "/ThirdPartyResourceData/company.com/foos/default/test", "test", expectedObj); err != nil {
+		t.Errorf("unexpected error: %v", err)
+		t.FailNow()
+		return
+	}
+	if err := 
+
+	resp, err := http.Get(server.URL + "/thirdparty/company.com/" + version + "/namespaces/default/foos/test")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("unexpected status: %v", resp)
+	}
+
+	item := Foo{}
+	if err := decodeResponse(resp, &item); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// TODO: validate etcd set things here
+	item.ObjectMeta = expectedObj.ObjectMeta
+
+	if !reflect.DeepEqual(item, expectedObj) {
+		t.Errorf("expected:\n%v\nsaw:\n%v\n", expectedObj, item)
+	}
+
+	path := makeThirdPartyPath("company.com")
+	master.RemoveThirdPartyResource(path)
+
+	resp, err = http.Get(server.URL + "/thirdparty/company.com/" + version + "/namespaces/default/foos/test")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+		return
+	}
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unexpected status: %v", resp)
+	}
+	expectDeletedKeys := []string{etcdtest.PathPrefix() + "/ThirdPartyResourceData/company.com/foos/default/test"}
+	if !reflect.DeepEqual(fakeClient.DeletedKeys, expectDeletedKeys) {
+		t.Errorf("unexpected deleted keys: %v", fakeClient.DeletedKeys)
+	}
 }

@@ -242,6 +242,8 @@ type Master struct {
 
 	// storage for third party objects
 	thirdPartyStorage storage.Interface
+	// map from api path to storage for those objects
+	thirdPartyResources map[string]*thirdpartyresourcedataetcd.REST
 }
 
 // NewEtcdStorage returns a storage.Interface for the provided arguments or an error if the version
@@ -572,6 +574,11 @@ func (m *Master) init(c *Config) {
 
 	if m.exp {
 		expVersion := m.experimental(c)
+
+		// TODO: this should be different.
+		m.thirdPartyStorage = c.DatabaseStorage
+		m.thirdPartyResources = map[string]*thirdpartyresourcedataetcd.REST{}
+
 		if err := expVersion.InstallREST(m.handlerContainer); err != nil {
 			glog.Fatalf("Unable to setup experimental api: %v", err)
 		}
@@ -774,7 +781,76 @@ func (m *Master) api_v1() *apiserver.APIGroupVersion {
 	return version
 }
 
-func (m *Master) InstallThirdPartyAPI(rsrc *experimental.ThirdPartyResource) error {
+const thirdpartyprefix = "/thirdparty/"
+
+func makeThirdPartyPath(group string) string {
+	return thirdpartyprefix + group
+}
+
+func (m *Master) HasThirdPartyResource(rsrc *expapi.ThirdPartyResource) (bool, error) {
+	_, group, err := thirdpartyresourcedata.ExtractApiGroupAndKind(rsrc)
+	if err != nil {
+		return false, err
+	}
+	path := makeThirdPartyPath(group)
+	services := m.handlerContainer.RegisteredWebServices()
+	for ix := range services {
+		if services[ix].RootPath() == path {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *Master) RemoveThirdPartyResource(path string) error {
+	storage, found := m.thirdPartyResources[path]
+	if found {
+		if err := m.removeAllThirdPartyResources(storage); err != nil {
+			return err
+		}
+	}
+
+	services := m.handlerContainer.RegisteredWebServices()
+	for ix := range services {
+		if services[ix].RootPath() == path {
+			m.handlerContainer.Remove(services[ix])
+		}
+	}
+	return nil
+}
+
+func (m *Master) removeAllThirdPartyResources(registry *thirdpartyresourcedataetcd.REST) error {
+	ctx := api.NewDefaultContext()
+	existingData, err := registry.List(ctx, labels.Everything(), fields.Everything())
+	if err != nil {
+		return err
+	}
+	list, ok := existingData.(*expapi.ThirdPartyResourceDataList)
+	if !ok {
+		return fmt.Errorf("expected a *ThirdPartyResourceDataList, got %#v", list)
+	}
+	for ix := range list.Items {
+		item := &list.Items[ix]
+		if _, err := registry.Delete(ctx, item.Name, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Master) ListThirdPartyResources() []string {
+	services := m.handlerContainer.RegisteredWebServices()
+	result := []string{}
+	for ix := range services {
+		service := services[ix]
+		if strings.HasPrefix(service.RootPath(), thirdpartyprefix) {
+			result = append(result, service.RootPath())
+		}
+	}
+	return result
+}
+
+func (m *Master) InstallThirdPartyResource(rsrc *expapi.ThirdPartyResource) error {
 	kind, group, err := thirdpartyresourcedata.ExtractApiGroupAndKind(rsrc)
 	if err != nil {
 		return err
@@ -783,8 +859,8 @@ func (m *Master) InstallThirdPartyAPI(rsrc *experimental.ThirdPartyResource) err
 	if err := thirdparty.InstallREST(m.handlerContainer); err != nil {
 		glog.Fatalf("Unable to setup thirdparty api: %v", err)
 	}
-	thirdPartyAPIPrefix := makeThirdPartyPath(group) + "/"
-	apiserver.AddApiWebService(m.handlerContainer, thirdPartyAPIPrefix, []string{rsrc.Versions[0].Name})
+	apiserver.AddApiWebService(m.handlerContainer, makeThirdPartyPath(group), []string{rsrc.Versions[0].Name})
+	m.thirdPartyResources[thirdparty.Root] = thirdparty.Storage[strings.ToLower(kind)+"s"].(*thirdpartyresourcedataetcd.REST)
 	thirdPartyRequestInfoResolver := &apiserver.APIRequestInfoResolver{APIPrefixes: sets.NewString(strings.TrimPrefix(group, "/")), RestMapper: thirdparty.Mapper}
 	apiserver.InstallServiceErrorHandler(m.handlerContainer, thirdPartyRequestInfoResolver, []string{thirdparty.Version})
 	return nil
@@ -793,7 +869,7 @@ func (m *Master) InstallThirdPartyAPI(rsrc *experimental.ThirdPartyResource) err
 func (m *Master) thirdpartyapi(group, kind, version string) *apiserver.APIGroupVersion {
 	resourceStorage := thirdpartyresourcedataetcd.NewREST(m.thirdPartyStorage, group, kind)
 
-	apiRoot := makeThirdPartyPath(group) + "/"
+	apiRoot := makeThirdPartyPath(group)
 
 	storage := map[string]rest.Storage{
 		strings.ToLower(kind) + "s": resourceStorage,
@@ -829,6 +905,17 @@ func (m *Master) experimental(c *Config) *apiserver.APIGroupVersion {
 	deploymentStorage := deploymentetcd.NewREST(c.ExpDatabaseStorage)
 	jobStorage := jobetcd.NewREST(c.ExpDatabaseStorage)
 
+	thirdPartyControl := ThirdPartyController{
+		master: m,
+		thirdPartyResourceRegistry: thirdPartyResourceStorage,
+	}
+	go func() {
+		util.Forever(func() {
+			if err := thirdPartyControl.SyncLoop(); err != nil {
+				glog.Warningf("third party resource sync failed: %v", err)
+			}
+		}, 10*time.Second)
+	}()
 	storage := map[string]rest.Storage{
 		strings.ToLower("replicationControllers"):       controllerStorage.ReplicationController,
 		strings.ToLower("replicationControllers/scale"): controllerStorage.Scale,
