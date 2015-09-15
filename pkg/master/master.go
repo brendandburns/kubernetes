@@ -37,7 +37,7 @@ import (
 	"k8s.io/kubernetes/pkg/api/meta"
 	"k8s.io/kubernetes/pkg/api/rest"
 	"k8s.io/kubernetes/pkg/api/v1"
-	"k8s.io/kubernetes/pkg/apis/experimental"
+	expapi "k8s.io/kubernetes/pkg/apis/experimental"
 	"k8s.io/kubernetes/pkg/apiserver"
 	"k8s.io/kubernetes/pkg/auth/authenticator"
 	"k8s.io/kubernetes/pkg/auth/authorizer"
