@@ -17,6 +17,7 @@ limitations under the License.
 package resource
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -25,11 +26,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"k8s.io/kubernetes/pkg/api/meta"
 	"k8s.io/kubernetes/pkg/api/validation"
 	"k8s.io/kubernetes/pkg/runtime"
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
+	"k8s.io/kubernetes/pkg/util/exec"
 	"k8s.io/kubernetes/pkg/util/yaml"
 	"k8s.io/kubernetes/pkg/watch"
 )
@@ -216,9 +219,8 @@ func ValidateSchema(data []byte, schema validation.Schema) error {
 // URLVisitor downloads the contents of a URL, and if successful, returns
 // an info object representing the downloaded object.
 type URLVisitor struct {
-	*Mapper
-	URL    *url.URL
-	Schema validation.Schema
+	URL *url.URL
+	StreamVisitor
 }
 
 func (v *URLVisitor) Visit(fn VisitorFunc) error {
@@ -230,18 +232,8 @@ func (v *URLVisitor) Visit(fn VisitorFunc) error {
 	if res.StatusCode != 200 {
 		return fmt.Errorf("unable to read URL %q, server reported %d %s", v.URL, res.StatusCode, res.Status)
 	}
-	data, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return fmt.Errorf("unable to read URL %q: %v\n", v.URL, err)
-	}
-	if err := ValidateSchema(data, v.Schema); err != nil {
-		return fmt.Errorf("error validating %q: %v", v.URL, err)
-	}
-	info, err := v.Mapper.InfoForData(data, v.URL.String())
-	if err != nil {
-		return err
-	}
-	return fn(info, nil)
+	v.StreamVisitor.Reader = res.Body
+	return v.StreamVisitor.Visit(fn)
 }
 
 // DecoratedVisitor will invoke the decorators in order prior to invoking the visitor function
@@ -375,7 +367,7 @@ func ignoreFile(path string, extensions []string) bool {
 }
 
 // FileVisitorForSTDIN return a special FileVisitor just for STDIN
-func FileVisitorForSTDIN(mapper *Mapper, schema validation.Schema) Visitor {
+func FileVisitorForSTDIN(mapper *Mapper, schema validation.Schema) visitorStreamTransformer {
 	return &FileVisitor{
 		Path:          constSTDINstr,
 		StreamVisitor: NewStreamVisitor(nil, mapper, constSTDINstr, schema),
@@ -385,8 +377,8 @@ func FileVisitorForSTDIN(mapper *Mapper, schema validation.Schema) Visitor {
 // ExpandPathsToFileVisitors will return a slice of FileVisitors that will handle files from the provided path.
 // After FileVisitors open the files, they will pass a io.Reader to a StreamVisitor to do the reading. (stdin
 // is also taken care of). Paths argument also accepts a single file, and will return a single visitor
-func ExpandPathsToFileVisitors(mapper *Mapper, paths string, recursive bool, extensions []string, schema validation.Schema) ([]Visitor, error) {
-	var visitors []Visitor
+func ExpandPathsToFileVisitors(mapper *Mapper, paths string, recursive bool, extensions []string, schema validation.Schema) ([]visitorStreamTransformer, error) {
+	var visitors []visitorStreamTransformer
 	err := filepath.Walk(paths, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -449,8 +441,10 @@ type StreamVisitor struct {
 	io.Reader
 	*Mapper
 
-	Source string
-	Schema validation.Schema
+	Source    string
+	Schema    validation.Schema
+	Transform StreamTransform
+	Exec      exec.Interface
 }
 
 // NewStreamVisitor is a helper function that is useful when we want to change the fields of the struct but keep calls the same.
@@ -463,9 +457,41 @@ func NewStreamVisitor(r io.Reader, mapper *Mapper, source string, schema validat
 	}
 }
 
+func (v *StreamVisitor) SetStreamTransform(fn StreamTransform) {
+	v.Transform = fn
+}
+
 // Visit implements Visitor over a stream. StreamVisitor is able to distinct multiple resources in one stream.
 func (v *StreamVisitor) Visit(fn VisitorFunc) error {
-	d := yaml.NewYAMLOrJSONDecoder(v.Reader, 4096)
+	reader := v.Reader
+	if v.Transform == nil {
+		data, err := ioutil.ReadAll(reader)
+		if err != nil {
+			return err
+		}
+		scanner := bufio.NewScanner(bytes.NewBuffer(data))
+		if scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "#!") {
+				transformer, err := NewExecTransformer(strings.TrimSpace(line[2:]))
+				if err != nil {
+					return err
+				}
+				v.Transform = transformer
+			}
+		}
+		if scanner.Err() != nil {
+			return scanner.Err()
+		}
+		reader = bytes.NewBuffer(data)
+	}
+	if v.Transform != nil {
+		var err error
+		if reader, err = v.Transform(reader); err != nil {
+			return err
+		}
+	}
+	d := yaml.NewYAMLOrJSONDecoder(reader, 4096)
 	for {
 		ext := runtime.RawExtension{}
 		if err := d.Decode(&ext); err != nil {

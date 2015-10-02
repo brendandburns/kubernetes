@@ -62,7 +62,10 @@ func NewCmdCreate(f *cmdutil.Factory, out io.Writer) *cobra.Command {
 				return
 			}
 			cmdutil.CheckErr(ValidateArgs(cmd, args))
-			cmdutil.CheckErr(cmdutil.ValidateOutputArgs(cmd))
+			// Limit output options for non dry-run execution
+			if !cmdutil.GetFlagBool(cmd, "dry-run") {
+				cmdutil.CheckErr(cmdutil.ValidateOutputArgs(cmd))
+			}
 			cmdutil.CheckErr(RunCreate(f, cmd, out, options))
 		},
 	}
@@ -71,12 +74,14 @@ func NewCmdCreate(f *cmdutil.Factory, out io.Writer) *cobra.Command {
 	kubectl.AddJsonFilenameFlag(cmd, &options.Filenames, usage)
 	cmd.MarkFlagRequired("filename")
 	cmdutil.AddValidateFlags(cmd)
-	cmdutil.AddOutputFlagsForMutation(cmd)
 	cmdutil.AddApplyAnnotationFlags(cmd)
 
 	// create subcommands
 	cmd.AddCommand(NewCmdCreateNamespace(f, out))
 	cmd.AddCommand(NewCmdCreateSecret(f, out))
+	cmdutil.AddPrinterFlags(cmd)
+	cmd.Flags().String("transforms", "", "Comma separated list of transforms to apply.  If non-empty, load the transforms and use them to transform input.  Transforms are applied in the order specified in the list.")
+	cmd.Flags().Bool("dry-run", false, "If true, only print the object that would be sent, without sending it.")
 	return cmd
 }
 
@@ -99,17 +104,27 @@ func RunCreate(f *cmdutil.Factory, cmd *cobra.Command, out io.Writer, options *C
 	}
 
 	mapper, typer := f.Object()
-	r := resource.NewBuilder(mapper, typer, f.ClientMapperForCommand()).
+	b := resource.NewBuilder(mapper, typer, f.ClientMapperForCommand()).
 		Schema(schema).
 		ContinueOnError().
 		NamespaceParam(cmdNamespace).DefaultNamespace().
 		FilenameParam(enforceNamespace, options.Filenames...).
-		Flatten().
-		Do()
+		Flatten()
+	transformArg := cmdutil.GetFlagString(cmd, "transforms")
+	if len(transformArg) > 0 {
+		transform, err := getTransform(transformArg, f)
+		if err != nil {
+			return err
+		}
+		b.StreamTransform(transform)
+	}
+	r := b.Do()
 	err = r.Err()
 	if err != nil {
 		return err
 	}
+
+	dryRun := cmdutil.GetFlagBool(cmd, "dry-run")
 
 	count := 0
 	err = r.Visit(func(info *resource.Info, err error) error {
@@ -120,11 +135,17 @@ func RunCreate(f *cmdutil.Factory, cmd *cobra.Command, out io.Writer, options *C
 			return cmdutil.AddSourceToErr("creating", info.Source, err)
 		}
 
+		count++
+		if dryRun {
+			printer, err := f.PrinterForMapping(cmd, info.ResourceMapping(), false)
+			if err != nil {
+				return err
+			}
+			return printer.PrintObj(info.Object, out)
+		}
 		if err := createAndRefresh(info); err != nil {
 			return cmdutil.AddSourceToErr("creating", info.Source, err)
 		}
-
-		count++
 		shortOutput := cmdutil.GetFlagString(cmd, "output") == "name"
 		if !shortOutput {
 			printObjectSpecificMessage(info.Object, out)
@@ -243,4 +264,33 @@ func RunCreateSubcommand(f *cmdutil.Factory, cmd *cobra.Command, out io.Writer, 
 	}
 
 	return f.PrintObject(cmd, obj, out)
+}
+
+// given a list of transform specs, give back a single compound transform, or error if one occurs.
+func getTransform(transformSpec string, f *cmdutil.Factory) (resource.StreamTransform, error) {
+	parts := strings.Split(transformSpec, ",")
+	transforms := []resource.StreamTransform{}
+	for _, part := range parts {
+		transform, err := getOneTransform(part, f)
+		if err != nil {
+			return nil, err
+		}
+		transforms = append(transforms, transform)
+	}
+	return resource.StreamTransformList(transforms).Transform, nil
+}
+
+// given one transform spec, give back a StreamTransform, or error if one occurs.
+func getOneTransform(transformSpec string, f *cmdutil.Factory) (resource.StreamTransform, error) {
+	parts := strings.SplitN(transformSpec, ":", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("expected <name>:<arg>, saw: %s", transformSpec)
+	}
+	name := parts[0]
+	arg := parts[1]
+	switch name {
+	case "exec":
+		return resource.NewExecTransformer(arg)
+	}
+	return nil, fmt.Errorf("unknown transform: %s", name)
 }

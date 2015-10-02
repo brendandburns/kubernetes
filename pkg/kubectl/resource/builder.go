@@ -36,6 +36,13 @@ import (
 var FileExtensions = []string{".json", ".yaml", ".yml"}
 var InputExtensions = append(FileExtensions, "stdin")
 
+// visitorStreamTransformer combines the Visitor and the StreamTransformer interfaces
+// this is used for all visitors that read raw input (Builder.paths)
+type visitorStreamTransformer interface {
+	Visitor
+	StreamTransformer
+}
+
 // Builder provides convenience functions for taking arguments and parameters
 // from the command line and converting them to a list of resources to iterate
 // over using the Visitor interface.
@@ -44,7 +51,7 @@ type Builder struct {
 
 	errs []error
 
-	paths  []Visitor
+	paths  []visitorStreamTransformer
 	stream bool
 	dir    bool
 
@@ -70,6 +77,8 @@ type Builder struct {
 	continueOnError    bool
 
 	schema validation.Schema
+
+	transform StreamTransform
 }
 
 type resourceTuple struct {
@@ -124,9 +133,11 @@ func (b *Builder) FilenameParam(enforceNamespace bool, paths ...string) *Builder
 func (b *Builder) URL(urls ...*url.URL) *Builder {
 	for _, u := range urls {
 		b.paths = append(b.paths, &URLVisitor{
-			Mapper: b.mapper,
-			URL:    u,
-			Schema: b.schema,
+			URL: u,
+			StreamVisitor: StreamVisitor{
+				Schema: b.schema,
+				Mapper: b.mapper,
+			},
 		})
 	}
 	return b
@@ -629,10 +640,14 @@ func (b *Builder) visitorResult() *Result {
 		}
 
 		var visitors Visitor
+		visitorList := make([]Visitor, len(b.paths))
+		for ix := range b.paths {
+			visitorList[ix] = b.paths[ix]
+		}
 		if b.continueOnError {
-			visitors = EagerVisitorList(b.paths)
+			visitors = EagerVisitorList(visitorList)
 		} else {
-			visitors = VisitorList(b.paths)
+			visitors = VisitorList(visitorList)
 		}
 
 		// only items from disk can be refetched
@@ -647,7 +662,7 @@ func (b *Builder) visitorResult() *Result {
 			}
 			visitors = NewDecoratedVisitor(visitors, RetrieveLatest)
 		}
-		return &Result{singular: singular, visitor: visitors, sources: b.paths}
+		return &Result{singular: singular, visitor: visitors, sources: visitorList}
 	}
 
 	return &Result{err: fmt.Errorf("you must provide one or more resources by argument or filename (%s)", strings.Join(InputExtensions, "|"))}
@@ -658,6 +673,9 @@ func (b *Builder) visitorResult() *Result {
 // inputs are consumed by the first execution - use Infos() or Object() on the Result to capture a list
 // for further iteration.
 func (b *Builder) Do() *Result {
+	for ix := range b.paths {
+		b.paths[ix].SetStreamTransform(b.transform)
+	}
 	r := b.visitorResult()
 	if r.err != nil {
 		return r
@@ -696,4 +714,9 @@ func SplitResourceArgument(arg string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+func (b *Builder) StreamTransform(transform StreamTransform) *Builder {
+	b.transform = transform
+	return b
 }

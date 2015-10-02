@@ -18,6 +18,7 @@ package prober
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"strconv"
@@ -214,5 +215,9 @@ func (eic execInContainer) CombinedOutput() ([]byte, error) {
 }
 
 func (eic execInContainer) SetDir(dir string) {
+	//unimplemented
+}
+
+func (eic execInContainer) SetStdin(stdin io.Reader) {
 	//unimplemented
 }
