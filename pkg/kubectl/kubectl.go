@@ -18,11 +18,15 @@ limitations under the License.
 package kubectl
 
 import (
+	"fmt"
 	"strings"
 
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/latest"
 	"k8s.io/kubernetes/pkg/api/meta"
 	"k8s.io/kubernetes/pkg/api/unversioned"
+	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/pkg/registry/thirdpartyresourcedata"
 )
 
 const kubectlAnnotationPrefix = "kubectl.kubernetes.io/"
@@ -41,6 +45,59 @@ func listOfImages(spec *api.PodSpec) []string {
 
 func makeImageList(spec *api.PodSpec) string {
 	return strings.Join(listOfImages(spec), ",")
+}
+
+type ThirdPartyResourceMapper struct {
+	Resources map[string]unversioned.GroupVersionKind
+}
+
+func interfacesFor(version string) (*meta.VersionInterfaces, error) {
+	switch version {
+	// Fix this...
+	case "company.com/v1":
+		return &meta.VersionInterfaces{
+			Codec:            api.Codec,
+			ObjectConvertor:  api.Scheme,
+			MetadataAccessor: meta.NewAccessor(),
+		}, nil
+	default:
+		g, _ := latest.Group("metrics")
+		groupVersions := make([]string, len(g.GroupVersions))
+		for ix := range g.GroupVersions {
+			groupVersions[ix] = g.GroupVersions[ix].String()
+		}
+		return nil, fmt.Errorf("unsupported storage version: %s (valid: %s)", version, strings.Join(groupVersions, ", "))
+	}
+}
+
+func NewThirdPartyResourceMapper(list *extensions.ThirdPartyResourceList) (meta.RESTMapper, error) {
+	gvs, gvks, err := thirdpartyresourcedata.ExtractGroupVersionKind(list)
+	if err != nil {
+		return nil, err
+	}
+	mapper := meta.NewDefaultRESTMapper(gvs, func(version string) (*meta.VersionInterfaces, error) {
+		for ix := range gvs {
+			if gvs[ix].String() == version {
+				return &meta.VersionInterfaces{
+					Codec:            api.Codec,
+					ObjectConvertor:  api.Scheme,
+					MetadataAccessor: meta.NewAccessor(),
+				}, nil
+			}
+		}
+		g, _ := latest.Group("metrics")
+		groupVersions := []string{}
+		if g.GroupVersions != nil {
+			for ix := range g.GroupVersions {
+				groupVersions = append(groupVersions, g.GroupVersions[ix].String())
+			}
+		}
+		return nil, fmt.Errorf("unsupported storage version: %s (valid: %s)", version, strings.Join(groupVersions, ", "))
+	})
+	for ix := range gvks {
+		mapper.Add(gvks[ix], meta.RESTScopeNamespace, false)
+	}
+	return mapper, nil
 }
 
 // OutputVersionMapper is a RESTMapper that will prefer mappings that

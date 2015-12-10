@@ -32,6 +32,27 @@ import (
 	"k8s.io/kubernetes/pkg/runtime"
 )
 
+type thirdPartyObjectConverter struct {
+	converter runtime.ObjectConvertor
+}
+
+func (t *thirdPartyObjectConverter) ConvertToVersion(in runtime.Object, outVersion string) (out runtime.Object, err error) {
+	switch in.(type) {
+		case *extensions.ThirdPartyResourceData:
+			return in, nil
+		default:
+			return t.converter.ConvertToVersion(in, outVersion)	
+	}
+}
+
+func (t *thirdPartyObjectConverter) Convert(in, out interface{}) error {
+	return t.converter.Convert(in, out)
+}
+
+func (t *thirdPartyObjectConverter) ConvertFieldLabel(version, kind, label, value string) (string, string, error) {
+	return t.converter.ConvertFieldLabel(version, kind, label, value)
+}
+
 type thirdPartyResourceDataMapper struct {
 	mapper  meta.RESTMapper
 	kind    string
@@ -74,6 +95,7 @@ func (t *thirdPartyResourceDataMapper) RESTMapping(gk unversioned.GroupKind, ver
 		return nil, err
 	}
 	mapping.Codec = NewCodec(mapping.Codec, t.kind)
+	mapping.ObjectConvertor = &thirdPartyObjectConverter{mapping.ObjectConvertor}
 	return mapping, nil
 }
 
@@ -108,28 +130,51 @@ func NewCodec(codec runtime.Codec, kind string) runtime.Codec {
 	return &thirdPartyResourceDataCodec{codec, kind}
 }
 
-func (t *thirdPartyResourceDataCodec) populate(objIn *extensions.ThirdPartyResourceData, data []byte) error {
+func parseObject(data []byte) (map[string]interface{}, error) {
 	var obj interface{}
 	if err := json.Unmarshal(data, &obj); err != nil {
 		fmt.Printf("Invalid JSON:\n%s\n", string(data))
-		return err
+		return nil, err
 	}
 	mapObj, ok := obj.(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("unexpected object: %#v", obj)
+		return nil, fmt.Errorf("unexpected object: %#v", obj)
 	}
-	return t.populateFromObject(objIn, mapObj, data)
+	return mapObj, nil
 }
 
-func (t *thirdPartyResourceDataCodec) populateFromObject(objIn *extensions.ThirdPartyResourceData, mapObj map[string]interface{}, data []byte) error {
+func (t *thirdPartyResourceDataCodec) populate(data []byte) (runtime.Object, error) {
+	mapObj, err := parseObject(data)
+	if err != nil {
+		return nil, err
+	}
+	return t.populateFromObject(mapObj, data)
+}
+
+func (t *thirdPartyResourceDataCodec) populateFromObject(mapObj map[string]interface{}, data []byte) (runtime.Object, error) {
 	typeMeta := unversioned.TypeMeta{}
 	if err := json.Unmarshal(data, &typeMeta); err != nil {
-		return err
+		return nil, err
 	}
-	if typeMeta.Kind != t.kind {
-		return fmt.Errorf("unexpected kind: %s, expected %s", typeMeta.Kind, t.kind)
+	switch typeMeta.Kind {
+	case t.kind:
+		result := &extensions.ThirdPartyResourceData{}
+		if err := t.populateResource(result, mapObj, data); err != nil {
+			return nil, err
+		}
+		return result, nil
+	case t.kind + "List":
+		list := &extensions.ThirdPartyResourceDataList{}
+		if err := t.populateListResource(list, mapObj); err != nil {
+			return nil, err
+		}
+		return list, nil
+	default:
+		return nil, fmt.Errorf("unexpected kind: %s, expected %s", typeMeta.Kind, t.kind)
 	}
+}
 
+func (t *thirdPartyResourceDataCodec) populateResource(objIn *extensions.ThirdPartyResourceData, mapObj map[string]interface{}, data []byte) error {
 	metadata, ok := mapObj["metadata"].(map[string]interface{})
 	if !ok {
 		return fmt.Errorf("unexpected object for metadata: %#v", mapObj["metadata"])
@@ -143,17 +188,38 @@ func (t *thirdPartyResourceDataCodec) populateFromObject(objIn *extensions.Third
 	if err := json.Unmarshal(metadataData, &objIn.ObjectMeta); err != nil {
 		return err
 	}
+	// Override API Version with the ThirdPartyResourceData value
+	// TODO: fix this hard code
+	objIn.APIVersion = "extensions/v1beta1"
 
 	objIn.Data = data
 	return nil
 }
 
-func (t *thirdPartyResourceDataCodec) Decode(data []byte) (runtime.Object, error) {
-	result := &extensions.ThirdPartyResourceData{}
-	if err := t.populate(result, data); err != nil {
-		return nil, err
+func (t *thirdPartyResourceDataCodec) populateListResource(objIn *extensions.ThirdPartyResourceDataList, mapObj map[string]interface{}) error {
+	items, ok := mapObj["items"].([]interface{})
+	if !ok {
+		return fmt.Errorf("unexpected object for items: %#v", mapObj["items"])
 	}
-	return result, nil
+	objIn.Items = make([]extensions.ThirdPartyResourceData, len(items))
+	for ix := range items {
+		objData, err := json.Marshal(items[ix])
+		if err != nil {
+			return err
+		}
+		objMap, err := parseObject(objData)
+		if err != nil {
+			return err
+		}
+		if err := t.populateResource(&objIn.Items[ix], objMap, objData); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *thirdPartyResourceDataCodec) Decode(data []byte) (runtime.Object, error) {
+	return t.populate(data)
 }
 
 func (t *thirdPartyResourceDataCodec) DecodeToVersion(data []byte, gv unversioned.GroupVersion) (runtime.Object, error) {
@@ -170,11 +236,15 @@ func (t *thirdPartyResourceDataCodec) DecodeToVersion(data []byte, gv unversione
 }
 
 func (t *thirdPartyResourceDataCodec) DecodeInto(data []byte, obj runtime.Object) error {
+	mapObj, err := parseObject(data)
+	if err != nil {
+		return err
+	}
 	thirdParty, ok := obj.(*extensions.ThirdPartyResourceData)
 	if !ok {
 		return fmt.Errorf("unexpected object: %#v", obj)
 	}
-	return t.populate(thirdParty, data)
+	return t.populateResource(thirdParty, mapObj, data)
 }
 
 func (t *thirdPartyResourceDataCodec) DecodeIntoWithSpecifiedVersionKind(data []byte, obj runtime.Object, gvk unversioned.GroupVersionKind) error {
@@ -193,7 +263,7 @@ func (t *thirdPartyResourceDataCodec) DecodeIntoWithSpecifiedVersionKind(data []
 	}
 	mapObj, ok := dataObj.(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("unexpcted object: %#v", dataObj)
+		return fmt.Errorf("unexpected object: %#v", dataObj)
 	}
 	if kindObj, found := mapObj["kind"]; !found {
 		mapObj["kind"] = gvk.Kind
@@ -218,7 +288,7 @@ func (t *thirdPartyResourceDataCodec) DecodeIntoWithSpecifiedVersionKind(data []
 		}
 	}
 
-	if err := t.populate(thirdParty, data); err != nil {
+	if err := t.populateResource(thirdParty, mapObj, data); err != nil {
 		return err
 	}
 	return nil

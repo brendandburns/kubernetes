@@ -17,10 +17,12 @@ limitations under the License.
 package util
 
 import (
+	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/registered"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	client "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
+	"k8s.io/kubernetes/pkg/registry/thirdpartyresourcedata"
 )
 
 func NewClientCache(loader clientcmd.ClientConfig) *ClientCache {
@@ -72,7 +74,28 @@ func (c *ClientCache) ClientConfigForVersion(version string) (*client.Config, er
 		preferredGV = &gv
 	}
 
-	negotiatedVersion, err := client.NegotiateVersion(c.defaultClient, &config, preferredGV, registered.RegisteredGroupVersions)
+	gvClient, err := client.New(&config)
+	if err != nil {
+		return nil, err
+	}
+	clientVersions := []unversioned.GroupVersion{}
+	for ix := range registered.RegisteredGroupVersions {
+		clientVersions = append(clientVersions, registered.RegisteredGroupVersions[ix])
+	}
+	// Add in any third party group/version resources
+	list, err := gvClient.ThirdPartyResources(api.NamespaceDefault).List(unversioned.ListOptions{})
+        if err != nil {
+                return nil, err
+        }
+	gvs, _, err := thirdpartyresourcedata.ExtractGroupVersionKind(list)
+	if err != nil {
+		return nil, err
+	}
+	for ix := range gvs {
+		clientVersions = append(clientVersions, gvs[ix])
+	}
+
+	negotiatedVersion, err := client.NegotiateVersion(c.defaultClient, &config, preferredGV, clientVersions)
 	if err != nil {
 		return nil, err
 	}

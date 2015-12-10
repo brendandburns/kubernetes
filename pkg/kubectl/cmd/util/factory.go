@@ -43,6 +43,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/labels"
+	"k8s.io/kubernetes/pkg/registry/thirdpartyresourcedata"
 	"k8s.io/kubernetes/pkg/runtime"
 	"k8s.io/kubernetes/pkg/util"
 )
@@ -144,7 +145,17 @@ func NewFactory(optionalClientConfig clientcmd.ClientConfig) *Factory {
 			if cfg.GroupVersion != nil {
 				cmdApiVersion = *cfg.GroupVersion
 			}
-
+			client, err := clients.ClientForVersion("v1")
+			if err != nil {
+				fmt.Printf("Failed to create client: %v", err)
+			}
+			list, err := client.ThirdPartyResources(api.NamespaceDefault).List(unversioned.ListOptions{})
+			if err != nil {
+				fmt.Printf("Failed to populate third party resources: %v", err)
+			}
+			thirdPartyMapper, err := kubectl.NewThirdPartyResourceMapper(list)
+			mapper.RESTMapper = append(mapper.RESTMapper.(meta.MultiRESTMapper), thirdPartyMapper)
+			
 			return kubectl.OutputVersionMapper{RESTMapper: mapper, OutputVersions: []unversioned.GroupVersion{cmdApiVersion}}, api.Scheme
 		},
 		Client: func() (*client.Client, error) {
@@ -154,21 +165,30 @@ func NewFactory(optionalClientConfig clientcmd.ClientConfig) *Factory {
 			return clients.ClientConfigForVersion("")
 		},
 		RESTClient: func(mapping *meta.RESTMapping) (resource.RESTClient, error) {
-			gvk, err := api.RESTMapper.KindFor(mapping.Resource)
+			gvk, err := mapper.KindFor(mapping.Resource)
 			if err != nil {
 				return nil, err
 			}
-			client, err := clients.ClientForVersion(mapping.GroupVersionKind.GroupVersion().String())
+			c, err := clients.ClientForVersion(mapping.GroupVersionKind.GroupVersion().String())
 			if err != nil {
 				return nil, err
 			}
 			switch gvk.Group {
 			case api.SchemeGroupVersion.Group:
-				return client.RESTClient, nil
+				return c.RESTClient, nil
 			case extensions.SchemeGroupVersion.Group:
-				return client.ExtensionsClient.RESTClient, nil
+				return c.ExtensionsClient.RESTClient, nil
+			default:
+				cfg, err := clientConfig.ClientConfig()
+				if err != nil {
+					return nil, err
+				}
+				gv := gvk.GroupVersion()
+				cfg.GroupVersion = &gv
+				cfg.Prefix = "/apis"
+				cfg.Codec = thirdpartyresourcedata.NewCodec(c.RESTClient.Codec, gvk.Kind)
+				return client.RESTClientFor(cfg)
 			}
-			return nil, fmt.Errorf("unable to get RESTClient for resource '%s'", mapping.Resource)
 		},
 		Describer: func(mapping *meta.RESTMapping) (kubectl.Describer, error) {
 			client, err := clients.ClientForVersion(mapping.GroupVersionKind.GroupVersion().String())
