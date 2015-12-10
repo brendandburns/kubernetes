@@ -20,8 +20,6 @@ import (
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/apis/extensions"
 	kclientlib "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/watch"
 )
 
@@ -43,8 +41,8 @@ func (c *FakeThirdPartyResources) Get(name string) (*extensions.ThirdPartyResour
 	return obj.(*extensions.ThirdPartyResource), err
 }
 
-func (c *FakeThirdPartyResources) List(label labels.Selector, field fields.Selector) (*extensions.ThirdPartyResourceList, error) {
-	obj, err := c.Fake.Invokes(NewListAction("thirdpartyresources", c.Namespace, label, field), &extensions.ThirdPartyResourceList{})
+func (c *FakeThirdPartyResources) List(opts unversioned.ListOptions) (*extensions.ThirdPartyResourceList, error) {
+	obj, err := c.Fake.Invokes(NewListAction("thirdpartyresources", c.Namespace, opts), &extensions.ThirdPartyResourceList{})
 	if obj == nil {
 		return nil, err
 	}
@@ -80,6 +78,6 @@ func (c *FakeThirdPartyResources) Delete(name string) error {
 	return err
 }
 
-func (c *FakeThirdPartyResources) Watch(label labels.Selector, field fields.Selector, opts unversioned.ListOptions) (watch.Interface, error) {
-	return c.Fake.InvokesWatch(NewWatchAction("thirdpartyresources", c.Namespace, label, field, opts))
+func (c *FakeThirdPartyResources) Watch(opts unversioned.ListOptions) (watch.Interface, error) {
+	return c.Fake.InvokesWatch(NewWatchAction("thirdpartyresources", c.Namespace, opts))
 }
