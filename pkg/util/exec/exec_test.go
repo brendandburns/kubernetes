@@ -17,6 +17,7 @@ limitations under the License.
 package exec
 
 import (
+	"bytes"
 	osexec "os/exec"
 	"testing"
 )
@@ -99,5 +100,20 @@ func TestExecutableNotFound(t *testing.T) {
 	_, err := cmd.CombinedOutput()
 	if err != ErrExecutableNotFound {
 		t.Errorf("Expected error ErrExecutableNotFound but got %v", err)
+        }
+}
+
+func TestStdin(t *testing.T) {
+	ex := New()
+
+	input := "foo"
+	cmd := ex.Command("cat")
+	cmd.SetStdin(bytes.NewBuffer([]byte(input)))
+	data, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if string(data) != input {
+		t.Errorf("expected: %s, saw: %s", input, string(data))
 	}
 }
