@@ -26,6 +26,7 @@ import (
 	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/api/v1"
+	"k8s.io/kubernetes/pkg/apimachinery/registered"
 	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/runtime"
 )
@@ -57,11 +58,17 @@ func TestCodec(t *testing.T) {
 			name:      "missing kind",
 		},
 		{
-			obj:  &Foo{ObjectMeta: api.ObjectMeta{Name: "bar"}, TypeMeta: unversioned.TypeMeta{Kind: "Foo"}},
+			obj: &Foo{
+				ObjectMeta: api.ObjectMeta{Name: "bar"},
+				TypeMeta:   unversioned.TypeMeta{APIVersion: "company.com/v1", Kind: "Foo"},
+			},
 			name: "basic",
 		},
 		{
-			obj:  &Foo{ObjectMeta: api.ObjectMeta{Name: "bar", ResourceVersion: "baz"}, TypeMeta: unversioned.TypeMeta{Kind: "Foo"}},
+			obj: &Foo{
+				ObjectMeta: api.ObjectMeta{Name: "bar", ResourceVersion: "baz"},
+				TypeMeta:   unversioned.TypeMeta{APIVersion: "company.com/v1", Kind: "Foo"},
+			},
 			name: "resource version",
 		},
 		{
@@ -70,7 +77,10 @@ func TestCodec(t *testing.T) {
 					Name:              "bar",
 					CreationTimestamp: unversioned.Time{Time: time.Unix(100, 0)},
 				},
-				TypeMeta: unversioned.TypeMeta{Kind: "Foo"},
+				TypeMeta: unversioned.TypeMeta{
+					APIVersion: "company.com/v1",
+					Kind:       "Foo",
+				},
 			},
 			name: "creation time",
 		},
@@ -81,14 +91,19 @@ func TestCodec(t *testing.T) {
 					ResourceVersion: "baz",
 					Labels:          map[string]string{"foo": "bar", "baz": "blah"},
 				},
-				TypeMeta: unversioned.TypeMeta{Kind: "Foo"},
+				TypeMeta: unversioned.TypeMeta{APIVersion: "company.com/v1", Kind: "Foo"},
 			},
 			name: "labels",
 		},
 	}
+	registered.AddThirdPartyAPIGroupVersions(unversioned.GroupVersion{Group: "company.com", Version: "v1"})
 	for _, test := range tests {
 		d := &thirdPartyResourceDataDecoder{kind: "Foo", delegate: testapi.Extensions.Codec()}
-		e := &thirdPartyResourceDataEncoder{kind: "Foo", delegate: testapi.Extensions.Codec()}
+		e := &thirdPartyResourceDataEncoder{gvk: unversioned.GroupVersionKind{
+			Group:   "company.com",
+			Version: "v1",
+			Kind:    "Foo",
+		}, delegate: testapi.Extensions.Codec()}
 		data, err := json.Marshal(test.obj)
 		if err != nil {
 			t.Errorf("[%s] unexpected error: %v", test.name, err)
