@@ -2078,6 +2078,30 @@ __EOF__
   kube::test::get_object_assert pods "{{range.items}}{{$id_field}}:{{end}}" ''
 
   kube::test::clear_all
+
+  #################################
+  # Kubectl third party resources #
+  #################################
+
+  kubectl create -f - << __EOF__
+{
+  "metadata": {
+    "name": "foo.company.com"
+  },
+  "apiVersion": "extensions/v1beta1",
+  "kind": "ThirdPartyResource",
+  "versions": [
+    {
+      "name": "v1"
+    },
+    {
+      "name": "v2"
+    }
+  ]
+}
+__EOF__
+  
+  
 }
 
 runTests "v1"
