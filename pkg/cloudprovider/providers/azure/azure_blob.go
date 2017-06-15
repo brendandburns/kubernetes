@@ -41,6 +41,16 @@ func (az *Cloud) createVhdBlob(accountName, accountKey, name string, sizeGB int6
 	name = name + ".vhd"
 	err = blobClient.PutPageBlob(vhdContainerName, name, vhdSize, tags)
 	if err != nil {
+		// if container doesn't exist, create one and retry PutPageBlob
+		detail := err.Error()
+		if strings.Contains(detail, errContainerNotFound) {
+			err = blobClient.CreateContainer(vhdContainerName, azs.ContainerAccessTypePrivate)
+			if err == nil {
+				err = blobClient.PutPageBlob(vhdContainerName, name, vhdSize, tags)
+			}
+		}
+	}
+	if err != nil {
 		return "", "", fmt.Errorf("failed to put page blob: %v", err)
 	}
 	// add VHD signature to the blob
